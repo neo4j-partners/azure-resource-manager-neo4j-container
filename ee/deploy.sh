@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Script: deploy.sh
-# Purpose: Deploys the Neo4j Kubernetes Operator on Azure Kubernetes Service (AKS)
-#          using Azure Resource Manager (ARM) template.
+# Script: ee/deploy.sh
+# Purpose: Deploys Neo4j Enterprise Edition on AKS using the ARM template.
 # Usage: ./deploy.sh [OPTIONS] [RESOURCE_GROUP_NAME]
 # ==============================================================================
 
@@ -10,7 +9,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATE_FILE="${SCRIPT_DIR}/mainTemplate.json"
-PARAMETERS_FILE="${SCRIPT_DIR}/azuredeploy.parameters.json"
 
 # Defaults
 RESOURCE_GROUP="${1:-}"
@@ -20,9 +18,9 @@ OPERATOR_VERSION="1.0.0"
 OPERATOR_NAMESPACE="neo4j-operator-system"
 NEO4J_EDITION="enterprise"
 ACCEPT_LICENSE="true"
-TOPOLOGY_MODE="Standalone"
+TOPOLOGY_MODE="Cluster"
 CLUSTER_CORE_COUNT=3
-STORAGE_SIZE="20Gi"
+STORAGE_SIZE="50Gi"
 NEO4J_PASSWORD=""
 SERVICE_TYPE="LoadBalancer"
 AUTO_CONFIRM=false
@@ -31,7 +29,7 @@ usage() {
   cat <<EOF
 Usage: $0 [OPTIONS] [RESOURCE_GROUP_NAME]
 
-Deploy the Neo4j Kubernetes Operator on AKS via Azure Resource Manager (ARM).
+Deploy Neo4j Enterprise Edition on Azure Kubernetes Service (AKS).
 
 Arguments:
   RESOURCE_GROUP_NAME        Name of the target Azure Resource Group.
@@ -39,17 +37,18 @@ Arguments:
 Options:
   -g, --resource-group NAME  Name of the Azure Resource Group.
   -l, --location REGION      Azure region (default: ${LOCATION}).
-  -c, --cluster-name NAME    AKS Cluster name (default: neo4j-aks-<random>).
-  -e, --edition EDITION      Neo4j Edition: 'enterprise' or 'community' (default: ${NEO4J_EDITION}).
-  -t, --topology TOPOLOGY    Topology mode: 'Standalone' or 'Cluster' (default: ${TOPOLOGY_MODE}).
+  -c, --cluster-name NAME    AKS Cluster name (default: neo4j-ee-<random>).
+  -t, --topology TOPOLOGY    Topology mode: 'Cluster' or 'Standalone' (default: ${TOPOLOGY_MODE}).
+  -n, --cluster-size NUM     Number of core servers in the cluster (default: ${CLUSTER_CORE_COUNT}).
   -p, --password PASSWORD    Initial password for neo4j user.
   -v, --operator-version VER Operator version (default: ${OPERATOR_VERSION}).
+  -s, --storage-size SIZE    Data volume size (default: ${STORAGE_SIZE}).
   -y, --yes                  Skip interactive confirmations.
   -h, --help                 Show this help message.
 
 Examples:
-  ./deploy.sh my-neo4j-rg
-  ./deploy.sh -g neo4j-rg -l westeurope -e enterprise -t Cluster -p "MySecretPassw0rd!"
+  ./deploy.sh my-neo4j-ee-rg
+  ./deploy.sh -g my-neo4j-ee-rg -l westeurope -t Cluster -n 3 -p "MySecretPassw0rd!"
 EOF
   exit 0
 }
@@ -69,12 +68,12 @@ while [[ $# -gt 0 ]]; do
       CLUSTER_NAME="$2"
       shift 2
       ;;
-    -e|--edition)
-      NEO4J_EDITION="$2"
-      shift 2
-      ;;
     -t|--topology)
       TOPOLOGY_MODE="$2"
+      shift 2
+      ;;
+    -n|--cluster-size)
+      CLUSTER_CORE_COUNT="$2"
       shift 2
       ;;
     -p|--password)
@@ -83,6 +82,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -v|--operator-version)
       OPERATOR_VERSION="$2"
+      shift 2
+      ;;
+    -s|--storage-size)
+      STORAGE_SIZE="$2"
       shift 2
       ;;
     -y|--yes)
@@ -105,7 +108,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 echo "============================================================"
-echo " Neo4j Kubernetes Operator on AKS - Deployment Manager"
+echo " Neo4j Enterprise Edition on AKS - Deployment Manager"
 echo "============================================================"
 
 # Check prerequisites
@@ -136,7 +139,7 @@ fi
 # Generate default cluster name if missing
 if [[ -z "${CLUSTER_NAME}" ]]; then
   RANDOM_SUFFIX=$(head /dev/urandom | LC_ALL=C tr -dc 'a-z0-9' | head -c 5 || echo "aks")
-  CLUSTER_NAME="neo4j-aks-${RANDOM_SUFFIX}"
+  CLUSTER_NAME="neo4j-ee-${RANDOM_SUFFIX}"
 fi
 
 echo ""
@@ -145,16 +148,16 @@ echo "  Subscription:        ${SUBSCRIPTION_NAME}"
 echo "  Resource Group:      ${RESOURCE_GROUP}"
 echo "  Location:            ${LOCATION}"
 echo "  AKS Cluster Name:    ${CLUSTER_NAME}"
-echo "  Operator Version:    ${OPERATOR_VERSION}"
-echo "  Operator Namespace:  ${OPERATOR_NAMESPACE}"
-echo "  Neo4j Edition:       ${NEO4J_EDITION}"
+echo "  Edition:             Enterprise Edition"
 echo "  Topology Mode:       ${TOPOLOGY_MODE}"
-echo "  Service Type:        ${SERVICE_TYPE}"
+echo "  Core Members:        ${CLUSTER_CORE_COUNT}"
+echo "  Operator Version:    ${OPERATOR_VERSION}"
 echo "  Storage Size:        ${STORAGE_SIZE}"
+echo "  Service Type:        ${SERVICE_TYPE}"
 echo ""
 
 if [[ "${AUTO_CONFIRM}" != "true" ]]; then
-  read -rp "Proceed with deployment? [y/N]: " CONFIRM
+  read -rp "Proceed with Enterprise deployment? [y/N]: " CONFIRM
   if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
     echo "Deployment cancelled by user."
     exit 0
@@ -182,7 +185,8 @@ VALIDATION_OUTPUT=$(az deployment group validate \
     location="${LOCATION}" \
     operatorVersion="${OPERATOR_VERSION}" \
     operatorNamespace="${OPERATOR_NAMESPACE}" \
-    neo4jEdition="${NEO4J_EDITION}" \
+    neo4jEdition="enterprise" \
+    acceptLicense="true" \
     topologyMode="${TOPOLOGY_MODE}" \
     clusterCoreCount="${CLUSTER_CORE_COUNT}" \
     storageSize="${STORAGE_SIZE}" \
@@ -198,10 +202,10 @@ fi
 echo "Template validation passed successfully."
 
 # Step 3: Run Deployment
-DEPLOYMENT_NAME="neo4j-deployment-$(date +%s)"
+DEPLOYMENT_NAME="neo4j-ee-$(date +%s)"
 echo ""
 echo "==> Step 3: Initiating ARM Deployment '${DEPLOYMENT_NAME}'..."
-echo "This will provision the AKS cluster and deploy the Neo4j Operator. This typically takes 5-10 minutes."
+echo "This provisions AKS and boots the Neo4j Enterprise cluster. This typically takes 6-10 minutes."
 
 DEPLOY_RESULT=$(az deployment group create \
   --name "${DEPLOYMENT_NAME}" \
@@ -212,7 +216,8 @@ DEPLOY_RESULT=$(az deployment group create \
     location="${LOCATION}" \
     operatorVersion="${OPERATOR_VERSION}" \
     operatorNamespace="${OPERATOR_NAMESPACE}" \
-    neo4jEdition="${NEO4J_EDITION}" \
+    neo4jEdition="enterprise" \
+    acceptLicense="true" \
     topologyMode="${TOPOLOGY_MODE}" \
     clusterCoreCount="${CLUSTER_CORE_COUNT}" \
     storageSize="${STORAGE_SIZE}" \
@@ -222,10 +227,9 @@ DEPLOY_RESULT=$(az deployment group create \
 
 echo ""
 echo "============================================================"
-echo " Deployment Complete!"
+echo " Neo4j Enterprise Edition Deployment Complete!"
 echo "============================================================"
 
-# Extract outputs
 HTTP_ENDPOINT=$(echo "${DEPLOY_RESULT}" | jq -r '.properties.outputs.httpEndpoint.value // empty')
 BOLT_ENDPOINT=$(echo "${DEPLOY_RESULT}" | jq -r '.properties.outputs.boltEndpoint.value // empty')
 STATUS=$(echo "${DEPLOY_RESULT}" | jq -r '.properties.outputs.status.value // "Unknown"')
@@ -241,7 +245,7 @@ echo ""
 echo "List pods in the operator namespace:"
 echo "  kubectl get pods -n ${OPERATOR_NAMESPACE}"
 echo ""
-echo "View Neo4j Custom Resources:"
+echo "View Enterprise Cluster Status:"
 echo "  kubectl get neo4j"
 echo "============================================================"
 

@@ -6,8 +6,8 @@
       "name": "neo4j-marketplace-generator",
       "version": "1.0.0"
     },
-    "title": "Neo4j Kubernetes Operator on Azure Kubernetes Service (AKS)",
-    "description": "Deploys an Azure Kubernetes Service (AKS) cluster and provisions the Neo4j Kubernetes Operator with an optional Neo4j database instance.",
+    "title": "Neo4j Enterprise Edition on Azure Kubernetes Service (AKS)",
+    "description": "Deploys an Azure Kubernetes Service (AKS) cluster and provisions the Neo4j Kubernetes Operator with a Neo4j Enterprise Edition cluster or standalone instance.",
     "author": "Neo4j Partners"
   },
   "parameters": {
@@ -74,12 +74,12 @@
       "type": "bool",
       "defaultValue": true,
       "metadata": {
-        "description": "Whether to automatically deploy an initial Neo4j database instance."
+        "description": "Whether to automatically deploy an initial Neo4j Enterprise database instance."
       }
     },
     "databaseInstanceName": {
       "type": "string",
-      "defaultValue": "neo4j-instance",
+      "defaultValue": "neo4j-enterprise",
       "metadata": {
         "description": "The metadata name for the Neo4j Custom Resource."
       }
@@ -88,11 +88,10 @@
       "type": "string",
       "defaultValue": "enterprise",
       "allowedValues": [
-        "enterprise",
-        "community"
+        "enterprise"
       ],
       "metadata": {
-        "description": "The Neo4j database edition: 'enterprise' or 'community'."
+        "description": "The Neo4j database edition. Fixed to 'enterprise' for this template."
       }
     },
     "acceptLicense": {
@@ -106,18 +105,18 @@
       "type": "string",
       "defaultValue": "5.26.0",
       "metadata": {
-        "description": "The Neo4j database version (e.g. 5.26.0)."
+        "description": "The Neo4j Enterprise database version (e.g. 5.26.0)."
       }
     },
     "topologyMode": {
       "type": "string",
-      "defaultValue": "Standalone",
+      "defaultValue": "Cluster",
       "allowedValues": [
-        "Standalone",
-        "Cluster"
+        "Cluster",
+        "Standalone"
       ],
       "metadata": {
-        "description": "Database topology mode: Standalone or Cluster (Enterprise only)."
+        "description": "Enterprise database topology mode: Cluster (HA Raft) or Standalone."
       }
     },
     "clusterCoreCount": {
@@ -131,9 +130,9 @@
     },
     "storageSize": {
       "type": "string",
-      "defaultValue": "20Gi",
+      "defaultValue": "50Gi",
       "metadata": {
-        "description": "Persistent storage volume size for Neo4j database data (e.g. 20Gi, 50Gi)."
+        "description": "Persistent storage volume size for Neo4j database data (e.g. 50Gi, 100Gi)."
       }
     },
     "neo4jPassword": {
@@ -156,10 +155,10 @@
     }
   },
   "variables": {
-    "identityName": "[concat(parameters('clusterName'), '-deployer-identity')]",
+    "identityName": "[concat(parameters('clusterName'), '-ee-identity')]",
     "contributorRoleId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
     "roleAssignmentId": "[guid(resourceGroup().id, variables('identityName'), variables('contributorRoleId'))]",
-    "deploymentScriptName": "[concat(parameters('clusterName'), '-setup-neo4j')]"
+    "deploymentScriptName": "[concat(parameters('clusterName'), '-setup-neo4j-ee')]"
   },
   "resources": [
     {
@@ -295,7 +294,7 @@
             "secureValue": "[parameters('neo4jPassword')]"
           }
         ],
-        "scriptContent": "set -euo pipefail\necho \"Connecting to AKS cluster...\"\nMAX_RETRIES=15\nCONNECTED=false\nfor ((i=1; i<=MAX_RETRIES; i++)); do\n  echo \"Attempt $i to fetch credentials...\"\n  if az aks get-credentials --resource-group \"${RESOURCE_GROUP}\" --name \"${CLUSTER_NAME}\" --admin --overwrite-existing 2>/dev/null; then\n    if kubectl get nodes --request-timeout='10s' &>/dev/null; then\n      CONNECTED=true\n      break\n    fi\n  fi\n  sleep 10\ndone\n\nif [[ \"${CONNECTED}\" != \"true\" ]]; then\n  echo \"Failed to connect to AKS cluster.\" >&2\n  exit 1\nfi\n\necho \"Applying Neo4j CRDs...\"\nCRD_URL=\"https://github.com/neo4j-partners/neo4j-kubernetes-operator/releases/download/v${OPERATOR_VERSION}/neo4j-crd-${OPERATOR_VERSION}.yaml\"\nkubectl apply --server-side --force-conflicts -f \"${CRD_URL}\" || true\n\necho \"Installing Neo4j Operator via Helm (OCI)...\"\nhelm upgrade --install neo4j-operator oci://ghcr.io/neo4j-partners/charts/neo4j-operator \\\n  --version \"${OPERATOR_VERSION}\" \\\n  --namespace \"${OPERATOR_NAMESPACE}\" \\\n  --create-namespace \\\n  --wait \\\n  --timeout 10m\n\nDATABASE_ENDPOINT=\"N/A\"\nBOLT_ENDPOINT=\"N/A\"\nHTTP_ENDPOINT=\"N/A\"\n\nif [[ \"${DEPLOY_INSTANCE}\" == \"true\" ]]; then\n  echo \"Deploying Neo4j Custom Resource...\"\n  APP_NAMESPACE=\"default\"\n  if [[ -n \"${NEO4J_PASSWORD}\" ]]; then\n    kubectl create secret generic \"${INSTANCE_NAME}-auth\" \\\n      --namespace \"${APP_NAMESPACE}\" \\\n      --from-literal=NEO4J_AUTH=\"neo4j/${NEO4J_PASSWORD}\" \\\n      --dry-run=client -o yaml | kubectl apply -f -\n  fi\n\n  TOPOLOGY_CONFIG=\"mode: Standalone\"\n  if [[ \"${TOPOLOGY_MODE}\" == \"Cluster\" && \"${NEO4J_EDITION}\" == \"enterprise\" ]]; then\n    TOPOLOGY_CONFIG=\"mode: Cluster\n    cluster:\n      core:\n        servers: ${CLUSTER_CORE_COUNT}\"\n  fi\n\n  LICENSE_CONFIG=\"\"\n  if [[ \"${NEO4J_EDITION}\" == \"enterprise\" ]]; then\n    LICENSE_CONFIG=\"license:\n    accept: \\\"${ACCEPT_LICENSE}\\\"\"\n  fi\n\n  cat <<EOF > /tmp/neo4j-cr.yaml\napiVersion: neo4j.com/v1\nkind: Neo4j\nmetadata:\n  name: ${INSTANCE_NAME}\n  namespace: ${APP_NAMESPACE}\nspec:\n  edition: ${NEO4J_EDITION}\n  version: \"${NEO4J_VERSION}\"\n  ${LICENSE_CONFIG}\n  topology:\n    ${TOPOLOGY_CONFIG}\n  storage:\n    volumes:\n      data:\n        mode: Dynamic\n        dynamic:\n          size: \"${STORAGE_SIZE}\"\n  networking:\n    services:\n      default:\n        type: ${SERVICE_TYPE}\nEOF\n  kubectl apply -f /tmp/neo4j-cr.yaml\n  sleep 15\n\n  if [[ \"${SERVICE_TYPE}\" == \"LoadBalancer\" ]]; then\n    for ((j=1; j<=30; j++)); do\n      SERVICE_IP=$(kubectl get svc -n \"${APP_NAMESPACE}\" -l \"app.kubernetes.io/instance=${INSTANCE_NAME}\" -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)\n      if [[ -z \"${SERVICE_IP}\" ]]; then\n        SERVICE_IP=$(kubectl get svc -n \"${APP_NAMESPACE}\" -l \"neo4j.com/instance=${INSTANCE_NAME}\" -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)\n      fi\n      if [[ -n \"${SERVICE_IP}\" ]]; then\n        DATABASE_ENDPOINT=\"${SERVICE_IP}\"\n        BOLT_ENDPOINT=\"bolt://${SERVICE_IP}:7687\"\n        HTTP_ENDPOINT=\"http://${SERVICE_IP}:7474\"\n        break\n      fi\n      sleep 10\n    done\n  fi\n\n  if [[ \"${BOLT_ENDPOINT}\" == \"N/A\" ]]; then\n    DATABASE_ENDPOINT=\"${INSTANCE_NAME}.${APP_NAMESPACE}.svc.cluster.local\"\n    BOLT_ENDPOINT=\"bolt://${INSTANCE_NAME}.${APP_NAMESPACE}.svc.cluster.local:7687\"\n    HTTP_ENDPOINT=\"http://${INSTANCE_NAME}.${APP_NAMESPACE}.svc.cluster.local:7474\"\n  fi\nfi\n\nmkdir -p \"$(dirname \"${AZ_SCRIPTS_OUTPUT_PATH}\")\"\ncat <<EOF > \"${AZ_SCRIPTS_OUTPUT_PATH}\"\n{\n  \"status\": \"Success\",\n  \"operatorNamespace\": \"${OPERATOR_NAMESPACE}\",\n  \"operatorVersion\": \"${OPERATOR_VERSION}\",\n  \"databaseEndpoint\": \"${DATABASE_ENDPOINT}\",\n  \"boltEndpoint\": \"${BOLT_ENDPOINT}\",\n  \"httpEndpoint\": \"${HTTP_ENDPOINT}\",\n  \"clusterName\": \"${CLUSTER_NAME}\"\n}\nEOF"
+        "scriptContent": "set -euo pipefail\necho \"Connecting to AKS cluster...\"\nMAX_RETRIES=15\nCONNECTED=false\nfor ((i=1; i<=MAX_RETRIES; i++)); do\n  echo \"Attempt $i to fetch credentials...\"\n  if az aks get-credentials --resource-group \"${RESOURCE_GROUP}\" --name \"${CLUSTER_NAME}\" --admin --overwrite-existing 2>/dev/null; then\n    if kubectl get nodes --request-timeout='10s' &>/dev/null; then\n      CONNECTED=true\n      break\n    fi\n  fi\n  sleep 10\ndone\n\nif [[ \"${CONNECTED}\" != \"true\" ]]; then\n  echo \"Failed to connect to AKS cluster.\" >&2\n  exit 1\nfi\n\necho \"Applying Neo4j CRDs...\"\nCRD_URL=\"https://github.com/neo4j-partners/neo4j-kubernetes-operator/releases/download/v${OPERATOR_VERSION}/neo4j-crd-${OPERATOR_VERSION}.yaml\"\nkubectl apply --server-side --force-conflicts -f \"${CRD_URL}\" || true\n\necho \"Installing Neo4j Operator via Helm (OCI)...\"\nhelm upgrade --install neo4j-operator oci://ghcr.io/neo4j-partners/charts/neo4j-operator \\\n  --version \"${OPERATOR_VERSION}\" \\\n  --namespace \"${OPERATOR_NAMESPACE}\" \\\n  --create-namespace \\\n  --wait \\\n  --timeout 10m\n\nDATABASE_ENDPOINT=\"N/A\"\nBOLT_ENDPOINT=\"N/A\"\nHTTP_ENDPOINT=\"N/A\"\n\nif [[ \"${DEPLOY_INSTANCE}\" == \"true\" ]]; then\n  echo \"Deploying Neo4j Custom Resource...\"\n  APP_NAMESPACE=\"default\"\n  if [[ -n \"${NEO4J_PASSWORD}\" ]]; then\n    kubectl create secret generic \"${INSTANCE_NAME}-auth\" \\\n      --namespace \"${APP_NAMESPACE}\" \\\n      --from-literal=NEO4J_AUTH=\"neo4j/${NEO4J_PASSWORD}\" \\\n      --dry-run=client -o yaml | kubectl apply -f -\n  fi\n\n  TOPOLOGY_CONFIG=\"mode: Cluster\n    cluster:\n      core:\n        servers: ${CLUSTER_CORE_COUNT}\"\n  if [[ \"${TOPOLOGY_MODE}\" == \"Standalone\" ]]; then\n    TOPOLOGY_CONFIG=\"mode: Standalone\"\n  fi\n\n  cat <<EOF > /tmp/neo4j-cr.yaml\napiVersion: neo4j.com/v1\nkind: Neo4j\nmetadata:\n  name: ${INSTANCE_NAME}\n  namespace: ${APP_NAMESPACE}\nspec:\n  edition: enterprise\n  version: \"${NEO4J_VERSION}\"\n  license:\n    accept: \"${ACCEPT_LICENSE}\"\n  topology:\n    ${TOPOLOGY_CONFIG}\n  storage:\n    volumes:\n      data:\n        mode: Dynamic\n        dynamic:\n          size: \"${STORAGE_SIZE}\"\n  networking:\n    services:\n      default:\n        type: ${SERVICE_TYPE}\nEOF\n  kubectl apply -f /tmp/neo4j-cr.yaml\n  sleep 15\n\n  if [[ \"${SERVICE_TYPE}\" == \"LoadBalancer\" ]]; then\n    for ((j=1; j<=30; j++)); do\n      SERVICE_IP=$(kubectl get svc -n \"${APP_NAMESPACE}\" -l \"app.kubernetes.io/instance=${INSTANCE_NAME}\" -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)\n      if [[ -z \"${SERVICE_IP}\" ]]; then\n        SERVICE_IP=$(kubectl get svc -n \"${APP_NAMESPACE}\" -l \"neo4j.com/instance=${INSTANCE_NAME}\" -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)\n      fi\n      if [[ -n \"${SERVICE_IP}\" ]]; then\n        DATABASE_ENDPOINT=\"${SERVICE_IP}\"\n        BOLT_ENDPOINT=\"bolt://${SERVICE_IP}:7687\"\n        HTTP_ENDPOINT=\"http://${SERVICE_IP}:7474\"\n        break\n      fi\n      sleep 10\n    done\n  fi\n\n  if [[ \"${BOLT_ENDPOINT}\" == \"N/A\" ]]; then\n    DATABASE_ENDPOINT=\"${INSTANCE_NAME}.${APP_NAMESPACE}.svc.cluster.local\"\n    BOLT_ENDPOINT=\"bolt://${INSTANCE_NAME}.${APP_NAMESPACE}.svc.cluster.local:7687\"\n    HTTP_ENDPOINT=\"http://${INSTANCE_NAME}.${APP_NAMESPACE}.svc.cluster.local:7474\"\n  fi\nfi\n\nmkdir -p \"$(dirname \"${AZ_SCRIPTS_OUTPUT_PATH}\")\"\ncat <<EOF > \"${AZ_SCRIPTS_OUTPUT_PATH}\"\n{\n  \"status\": \"Success\",\n  \"operatorNamespace\": \"${OPERATOR_NAMESPACE}\",\n  \"operatorVersion\": \"${OPERATOR_VERSION}\",\n  \"databaseEndpoint\": \"${DATABASE_ENDPOINT}\",\n  \"boltEndpoint\": \"${BOLT_ENDPOINT}\",\n  \"httpEndpoint\": \"${HTTP_ENDPOINT}\",\n  \"clusterName\": \"${CLUSTER_NAME}\"\n}\nEOF"
       }
     }
   ],
@@ -334,3 +333,4 @@
     }
   }
 }
+

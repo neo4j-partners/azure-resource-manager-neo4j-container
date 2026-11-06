@@ -3,7 +3,7 @@
   "contentVersion": "1.0.0.0",
   "parameters": {
     "clusterName": {
-      "value": "neo4j-aks-cluster"
+      "value": "neo4j-ee-cluster"
     },
     "kubernetesVersion": {
       "value": "1.30"
@@ -27,7 +27,7 @@
       "value": true
     },
     "databaseInstanceName": {
-      "value": "neo4j-instance"
+      "value": "neo4j-enterprise"
     },
     "neo4jEdition": {
       "value": "enterprise"
@@ -39,13 +39,13 @@
       "value": "5.26.0"
     },
     "topologyMode": {
-      "value": "Standalone"
+      "value": "Cluster"
     },
     "clusterCoreCount": {
       "value": 3
     },
     "storageSize": {
-      "value": "20Gi"
+      "value": "50Gi"
     },
     "neo4jPassword": {
       "value": ""

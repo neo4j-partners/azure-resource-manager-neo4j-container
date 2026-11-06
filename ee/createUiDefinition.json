@@ -8,7 +8,7 @@
         "name": "clusterName",
         "type": "Microsoft.Common.TextBox",
         "label": "AKS Cluster Name",
-        "defaultValue": "neo4j-aks-cluster",
+        "defaultValue": "neo4j-ee-cluster",
         "toolTip": "Specify a unique name for the Azure Kubernetes Service cluster (3-63 lowercase alphanumeric characters or hyphens).",
         "constraints": {
           "required": true,
@@ -26,7 +26,7 @@
             "name": "clusterSettingsIntro",
             "type": "Microsoft.Common.TextBlock",
             "options": {
-              "text": "Configure the Azure Kubernetes Service (AKS) cluster that will host the Neo4j Kubernetes Operator."
+              "text": "Configure the Azure Kubernetes Service (AKS) cluster for Neo4j Enterprise Edition."
             }
           },
           {
@@ -57,7 +57,7 @@
             "name": "nodeVmSize",
             "type": "Microsoft.Compute.SizeSelector",
             "label": "Worker Node VM Size",
-            "toolTip": "Choose the VM size for the AKS worker nodes. Standard_D4s_v5 or Standard_DS3_v2 recommended for production.",
+            "toolTip": "Choose the VM size for the AKS worker nodes. Standard_D4s_v5 or higher recommended for Enterprise workloads.",
             "recommendedSizes": [
               "Standard_D4s_v5",
               "Standard_D8s_v5",
@@ -74,7 +74,7 @@
             "type": "Microsoft.Common.Slider",
             "label": "Worker Node Count",
             "defaultValue": 3,
-            "toolTip": "Number of worker nodes in the initial system agent pool (minimum 3 recommended for high availability).",
+            "toolTip": "Number of worker nodes in the initial system agent pool (minimum 3 required for a 3-member cluster).",
             "constraints": {
               "required": true,
               "min": 1,
@@ -104,7 +104,7 @@
             "name": "operatorIntro",
             "type": "Microsoft.Common.TextBlock",
             "options": {
-              "text": "The Neo4j Kubernetes Operator automates the deployment, lifecycle management, and scaling of Neo4j graph databases on Kubernetes."
+              "text": "The Neo4j Kubernetes Operator automates lifecycle management and high-availability operations for Neo4j Enterprise clusters on AKS."
             }
           },
           {
@@ -124,7 +124,7 @@
             "type": "Microsoft.Common.TextBox",
             "label": "Operator Namespace",
             "defaultValue": "neo4j-operator-system",
-            "toolTip": "The Kubernetes namespace where the operator controller and CRDs will be installed.",
+            "toolTip": "The Kubernetes namespace where the operator controller will be installed.",
             "constraints": {
               "required": true,
               "regex": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$",
@@ -135,20 +135,20 @@
       },
       {
         "name": "databaseSettings",
-        "label": "Neo4j Database Instance",
+        "label": "Neo4j Enterprise Database",
         "elements": [
           {
             "name": "deployDatabaseInstance",
             "type": "Microsoft.Common.CheckBox",
-            "label": "Deploy Initial Neo4j Database",
+            "label": "Deploy Neo4j Enterprise Instance",
             "defaultValue": true,
-            "toolTip": "Check this box to automatically provision a Neo4j database Custom Resource upon cluster creation."
+            "toolTip": "Provision an initial Neo4j Enterprise database cluster upon AKS deployment."
           },
           {
             "name": "databaseInstanceName",
             "type": "Microsoft.Common.TextBox",
             "label": "Database Instance Name",
-            "defaultValue": "neo4j-instance",
+            "defaultValue": "neo4j-enterprise",
             "toolTip": "Name of the Neo4j Custom Resource.",
             "constraints": {
               "required": true,
@@ -158,40 +158,19 @@
             "visible": "[steps('databaseSettings').deployDatabaseInstance]"
           },
           {
-            "name": "neo4jEdition",
-            "type": "Microsoft.Common.DropDown",
-            "label": "Neo4j Edition",
-            "defaultValue": "enterprise",
-            "toolTip": "Choose between Enterprise Edition (clustering, advanced security) and Community Edition (standalone only).",
-            "constraints": {
-              "allowedValues": [
-                {
-                  "label": "Enterprise Edition (BYOL / Evaluation)",
-                  "value": "enterprise"
-                },
-                {
-                  "label": "Community Edition (GPLv3)",
-                  "value": "community"
-                }
-              ],
-              "required": true
-            },
-            "visible": "[steps('databaseSettings').deployDatabaseInstance]"
-          },
-          {
             "name": "acceptLicense",
             "type": "Microsoft.Common.CheckBox",
             "label": "I accept the Neo4j Enterprise Edition License Agreement",
             "defaultValue": true,
             "toolTip": "Required for Enterprise Edition deployments.",
-            "visible": "[and(steps('databaseSettings').deployDatabaseInstance, equals(steps('databaseSettings').neo4jEdition, 'enterprise'))]"
+            "visible": "[steps('databaseSettings').deployDatabaseInstance]"
           },
           {
             "name": "neo4jVersion",
             "type": "Microsoft.Common.TextBox",
-            "label": "Neo4j Database Version",
+            "label": "Neo4j Enterprise Version",
             "defaultValue": "5.26.0",
-            "toolTip": "Neo4j server version to run.",
+            "toolTip": "Neo4j Enterprise Server version to run.",
             "constraints": {
               "required": true
             },
@@ -201,17 +180,17 @@
             "name": "topologyMode",
             "type": "Microsoft.Common.DropDown",
             "label": "Topology Mode",
-            "defaultValue": "Standalone",
-            "toolTip": "Standalone runs 1 instance; Cluster runs high-availability Raft cluster (Enterprise only).",
+            "defaultValue": "Cluster",
+            "toolTip": "Cluster provides high-availability multi-core Raft clustering; Standalone runs 1 enterprise instance.",
             "constraints": {
               "allowedValues": [
                 {
-                  "label": "Standalone",
-                  "value": "Standalone"
+                  "label": "High-Availability Cluster (Recommended)",
+                  "value": "Cluster"
                 },
                 {
-                  "label": "Cluster (Enterprise Only)",
-                  "value": "Cluster"
+                  "label": "Standalone",
+                  "value": "Standalone"
                 }
               ],
               "required": true
@@ -235,13 +214,13 @@
           {
             "name": "storageSize",
             "type": "Microsoft.Common.TextBox",
-            "label": "Persistent Storage Size",
-            "defaultValue": "20Gi",
-            "toolTip": "Disk volume size for database files (e.g. 20Gi, 100Gi).",
+            "label": "Data Volume Size",
+            "defaultValue": "50Gi",
+            "toolTip": "Disk volume size for database files (e.g. 50Gi, 200Gi).",
             "constraints": {
               "required": true,
               "regex": "^[0-9]+(Gi|Ti)$",
-              "validationMessage": "Please specify a size followed by Gi or Ti (e.g., 20Gi)."
+              "validationMessage": "Please specify a size followed by Gi or Ti (e.g., 50Gi)."
             },
             "visible": "[steps('databaseSettings').deployDatabaseInstance]"
           },
@@ -263,7 +242,7 @@
             "type": "Microsoft.Common.DropDown",
             "label": "Service Connectivity",
             "defaultValue": "LoadBalancer",
-            "toolTip": "LoadBalancer creates an Azure Public Load Balancer for direct access; ClusterIP keeps the service internal to the cluster.",
+            "toolTip": "LoadBalancer creates an Azure Public Load Balancer; ClusterIP keeps the service internal to the cluster.",
             "constraints": {
               "allowedValues": [
                 {
@@ -293,7 +272,7 @@
       "operatorNamespace": "[steps('operatorSettings').operatorNamespace]",
       "deployDatabaseInstance": "[steps('databaseSettings').deployDatabaseInstance]",
       "databaseInstanceName": "[steps('databaseSettings').databaseInstanceName]",
-      "neo4jEdition": "[steps('databaseSettings').neo4jEdition]",
+      "neo4jEdition": "enterprise",
       "acceptLicense": "[steps('databaseSettings').acceptLicense]",
       "neo4jVersion": "[steps('databaseSettings').neo4jVersion]",
       "topologyMode": "[steps('databaseSettings').topologyMode]",
