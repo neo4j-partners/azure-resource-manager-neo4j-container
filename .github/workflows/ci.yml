@@ -1,0 +1,37 @@
+name: CI - Validate and Package
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    name: Validate ARM Template & UI Definition
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq zip
+
+      - name: Run Schema and Structure Verification
+        run: ./scripts/verify.sh
+
+      - name: Build Marketplace Package
+        run: ./scripts/package.sh
+
+      - name: Upload Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neo4j-kubernetes-operator-marketplace
+          path: dist/neo4j-kubernetes-operator-marketplace.zip
+          retention-days: 14
+

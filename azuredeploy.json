@@ -1,0 +1,336 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "neo4j-marketplace-generator",
+      "version": "1.0.0"
+    },
+    "title": "Neo4j Kubernetes Operator on Azure Kubernetes Service (AKS)",
+    "description": "Deploys an Azure Kubernetes Service (AKS) cluster and provisions the Neo4j Kubernetes Operator with an optional Neo4j database instance.",
+    "author": "Neo4j Partners"
+  },
+  "parameters": {
+    "clusterName": {
+      "type": "string",
+      "metadata": {
+        "description": "The name of the Azure Kubernetes Service (AKS) cluster."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "The Azure region where resources will be deployed."
+      }
+    },
+    "kubernetesVersion": {
+      "type": "string",
+      "defaultValue": "1.30",
+      "metadata": {
+        "description": "The version of Kubernetes to use for the AKS cluster."
+      }
+    },
+    "nodeVmSize": {
+      "type": "string",
+      "defaultValue": "Standard_D4s_v5",
+      "metadata": {
+        "description": "The virtual machine size for the AKS worker nodes."
+      }
+    },
+    "nodeCount": {
+      "type": "int",
+      "defaultValue": 3,
+      "minValue": 1,
+      "maxValue": 50,
+      "metadata": {
+        "description": "The number of nodes in the AKS system node pool."
+      }
+    },
+    "osDiskSizeGB": {
+      "type": "int",
+      "defaultValue": 128,
+      "minValue": 30,
+      "maxValue": 2048,
+      "metadata": {
+        "description": "OS disk size in GB for each AKS node."
+      }
+    },
+    "operatorVersion": {
+      "type": "string",
+      "defaultValue": "1.0.0",
+      "metadata": {
+        "description": "The release version of the Neo4j Kubernetes Operator to install."
+      }
+    },
+    "operatorNamespace": {
+      "type": "string",
+      "defaultValue": "neo4j-operator-system",
+      "metadata": {
+        "description": "The Kubernetes namespace to deploy the Neo4j Operator into."
+      }
+    },
+    "deployDatabaseInstance": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Whether to automatically deploy an initial Neo4j database instance."
+      }
+    },
+    "databaseInstanceName": {
+      "type": "string",
+      "defaultValue": "neo4j-instance",
+      "metadata": {
+        "description": "The metadata name for the Neo4j Custom Resource."
+      }
+    },
+    "neo4jEdition": {
+      "type": "string",
+      "defaultValue": "enterprise",
+      "allowedValues": [
+        "enterprise",
+        "community"
+      ],
+      "metadata": {
+        "description": "The Neo4j database edition: 'enterprise' or 'community'."
+      }
+    },
+    "acceptLicense": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Acknowledge and accept the Neo4j Enterprise Edition license agreement."
+      }
+    },
+    "neo4jVersion": {
+      "type": "string",
+      "defaultValue": "5.26.0",
+      "metadata": {
+        "description": "The Neo4j database version (e.g. 5.26.0)."
+      }
+    },
+    "topologyMode": {
+      "type": "string",
+      "defaultValue": "Standalone",
+      "allowedValues": [
+        "Standalone",
+        "Cluster"
+      ],
+      "metadata": {
+        "description": "Database topology mode: Standalone or Cluster (Enterprise only)."
+      }
+    },
+    "clusterCoreCount": {
+      "type": "int",
+      "defaultValue": 3,
+      "minValue": 3,
+      "maxValue": 9,
+      "metadata": {
+        "description": "Number of core cluster servers if Topology Mode is Cluster."
+      }
+    },
+    "storageSize": {
+      "type": "string",
+      "defaultValue": "20Gi",
+      "metadata": {
+        "description": "Persistent storage volume size for Neo4j database data (e.g. 20Gi, 50Gi)."
+      }
+    },
+    "neo4jPassword": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional initial password for neo4j user. If empty, operator generates a random secret."
+      }
+    },
+    "serviceType": {
+      "type": "string",
+      "defaultValue": "LoadBalancer",
+      "allowedValues": [
+        "LoadBalancer",
+        "ClusterIP"
+      ],
+      "metadata": {
+        "description": "Kubernetes service type for external or internal database access."
+      }
+    }
+  },
+  "variables": {
+    "identityName": "[concat(parameters('clusterName'), '-deployer-identity')]",
+    "contributorRoleId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
+    "roleAssignmentId": "[guid(resourceGroup().id, variables('identityName'), variables('contributorRoleId'))]",
+    "deploymentScriptName": "[concat(parameters('clusterName'), '-setup-neo4j')]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2023-01-31",
+      "name": "[variables('identityName')]",
+      "location": "[parameters('location')]"
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[variables('roleAssignmentId')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[variables('contributorRoleId')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName')), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      }
+    },
+    {
+      "type": "Microsoft.ContainerService/managedClusters",
+      "apiVersion": "2024-09-01",
+      "name": "[parameters('clusterName')]",
+      "location": "[parameters('location')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "dnsPrefix": "[concat(parameters('clusterName'), '-dns')]",
+        "kubernetesVersion": "[parameters('kubernetesVersion')]",
+        "enableRBAC": true,
+        "agentPoolProfiles": [
+          {
+            "name": "systempool",
+            "count": "[parameters('nodeCount')]",
+            "vmSize": "[parameters('nodeVmSize')]",
+            "osDiskSizeGB": "[parameters('osDiskSizeGB')]",
+            "osType": "Linux",
+            "mode": "System",
+            "type": "VirtualMachineScaleSets"
+          }
+        ],
+        "networkProfile": {
+          "networkPlugin": "kubenet",
+          "loadBalancerSku": "standard"
+        },
+        "storageProfile": {
+          "diskCSIDriver": {
+            "enabled": true
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deploymentScripts",
+      "apiVersion": "2023-08-01",
+      "name": "[variables('deploymentScriptName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.ContainerService/managedClusters', parameters('clusterName'))]",
+        "[resourceId('Microsoft.Authorization/roleAssignments', variables('roleAssignmentId'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))]"
+      ],
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))]": {}
+        }
+      },
+      "kind": "AzureCLI",
+      "properties": {
+        "azCliVersion": "2.60.0",
+        "retentionInterval": "P1D",
+        "timeout": "PT30M",
+        "cleanupPreference": "OnSuccess",
+        "environmentVariables": [
+          {
+            "name": "RESOURCE_GROUP",
+            "value": "[resourceGroup().name]"
+          },
+          {
+            "name": "CLUSTER_NAME",
+            "value": "[parameters('clusterName')]"
+          },
+          {
+            "name": "OPERATOR_VERSION",
+            "value": "[parameters('operatorVersion')]"
+          },
+          {
+            "name": "OPERATOR_NAMESPACE",
+            "value": "[parameters('operatorNamespace')]"
+          },
+          {
+            "name": "DEPLOY_INSTANCE",
+            "value": "[if(parameters('deployDatabaseInstance'), 'true', 'false')]"
+          },
+          {
+            "name": "INSTANCE_NAME",
+            "value": "[parameters('databaseInstanceName')]"
+          },
+          {
+            "name": "NEO4J_EDITION",
+            "value": "[parameters('neo4jEdition')]"
+          },
+          {
+            "name": "ACCEPT_LICENSE",
+            "value": "[if(parameters('acceptLicense'), 'yes', 'no')]"
+          },
+          {
+            "name": "NEO4J_VERSION",
+            "value": "[parameters('neo4jVersion')]"
+          },
+          {
+            "name": "TOPOLOGY_MODE",
+            "value": "[parameters('topologyMode')]"
+          },
+          {
+            "name": "CLUSTER_CORE_COUNT",
+            "value": "[string(parameters('clusterCoreCount'))]"
+          },
+          {
+            "name": "STORAGE_SIZE",
+            "value": "[parameters('storageSize')]"
+          },
+          {
+            "name": "SERVICE_TYPE",
+            "value": "[parameters('serviceType')]"
+          },
+          {
+            "name": "NEO4J_PASSWORD",
+            "secureValue": "[parameters('neo4jPassword')]"
+          }
+        ],
+        "scriptContent": "set -euo pipefail\necho \"Connecting to AKS cluster...\"\nMAX_RETRIES=15\nCONNECTED=false\nfor ((i=1; i<=MAX_RETRIES; i++)); do\n  echo \"Attempt $i to fetch credentials...\"\n  if az aks get-credentials --resource-group \"${RESOURCE_GROUP}\" --name \"${CLUSTER_NAME}\" --admin --overwrite-existing 2>/dev/null; then\n    if kubectl get nodes --request-timeout='10s' &>/dev/null; then\n      CONNECTED=true\n      break\n    fi\n  fi\n  sleep 10\ndone\n\nif [[ \"${CONNECTED}\" != \"true\" ]]; then\n  echo \"Failed to connect to AKS cluster.\" >&2\n  exit 1\nfi\n\necho \"Applying Neo4j CRDs...\"\nCRD_URL=\"https://github.com/neo4j-partners/neo4j-kubernetes-operator/releases/download/v${OPERATOR_VERSION}/neo4j-crd-${OPERATOR_VERSION}.yaml\"\nkubectl apply --server-side --force-conflicts -f \"${CRD_URL}\" || true\n\necho \"Installing Neo4j Operator via Helm (OCI)...\"\nhelm upgrade --install neo4j-operator oci://ghcr.io/neo4j-partners/charts/neo4j-operator \\\n  --version \"${OPERATOR_VERSION}\" \\\n  --namespace \"${OPERATOR_NAMESPACE}\" \\\n  --create-namespace \\\n  --wait \\\n  --timeout 10m\n\nDATABASE_ENDPOINT=\"N/A\"\nBOLT_ENDPOINT=\"N/A\"\nHTTP_ENDPOINT=\"N/A\"\n\nif [[ \"${DEPLOY_INSTANCE}\" == \"true\" ]]; then\n  echo \"Deploying Neo4j Custom Resource...\"\n  APP_NAMESPACE=\"default\"\n  if [[ -n \"${NEO4J_PASSWORD}\" ]]; then\n    kubectl create secret generic \"${INSTANCE_NAME}-auth\" \\\n      --namespace \"${APP_NAMESPACE}\" \\\n      --from-literal=NEO4J_AUTH=\"neo4j/${NEO4J_PASSWORD}\" \\\n      --dry-run=client -o yaml | kubectl apply -f -\n  fi\n\n  TOPOLOGY_CONFIG=\"mode: Standalone\"\n  if [[ \"${TOPOLOGY_MODE}\" == \"Cluster\" && \"${NEO4J_EDITION}\" == \"enterprise\" ]]; then\n    TOPOLOGY_CONFIG=\"mode: Cluster\n    cluster:\n      core:\n        servers: ${CLUSTER_CORE_COUNT}\"\n  fi\n\n  LICENSE_CONFIG=\"\"\n  if [[ \"${NEO4J_EDITION}\" == \"enterprise\" ]]; then\n    LICENSE_CONFIG=\"license:\n    accept: \\\"${ACCEPT_LICENSE}\\\"\"\n  fi\n\n  cat <<EOF > /tmp/neo4j-cr.yaml\napiVersion: neo4j.com/v1\nkind: Neo4j\nmetadata:\n  name: ${INSTANCE_NAME}\n  namespace: ${APP_NAMESPACE}\nspec:\n  edition: ${NEO4J_EDITION}\n  version: \"${NEO4J_VERSION}\"\n  ${LICENSE_CONFIG}\n  topology:\n    ${TOPOLOGY_CONFIG}\n  storage:\n    volumes:\n      data:\n        mode: Dynamic\n        dynamic:\n          size: \"${STORAGE_SIZE}\"\n  networking:\n    services:\n      default:\n        type: ${SERVICE_TYPE}\nEOF\n  kubectl apply -f /tmp/neo4j-cr.yaml\n  sleep 15\n\n  if [[ \"${SERVICE_TYPE}\" == \"LoadBalancer\" ]]; then\n    for ((j=1; j<=30; j++)); do\n      SERVICE_IP=$(kubectl get svc -n \"${APP_NAMESPACE}\" -l \"app.kubernetes.io/instance=${INSTANCE_NAME}\" -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)\n      if [[ -z \"${SERVICE_IP}\" ]]; then\n        SERVICE_IP=$(kubectl get svc -n \"${APP_NAMESPACE}\" -l \"neo4j.com/instance=${INSTANCE_NAME}\" -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)\n      fi\n      if [[ -n \"${SERVICE_IP}\" ]]; then\n        DATABASE_ENDPOINT=\"${SERVICE_IP}\"\n        BOLT_ENDPOINT=\"bolt://${SERVICE_IP}:7687\"\n        HTTP_ENDPOINT=\"http://${SERVICE_IP}:7474\"\n        break\n      fi\n      sleep 10\n    done\n  fi\n\n  if [[ \"${BOLT_ENDPOINT}\" == \"N/A\" ]]; then\n    DATABASE_ENDPOINT=\"${INSTANCE_NAME}.${APP_NAMESPACE}.svc.cluster.local\"\n    BOLT_ENDPOINT=\"bolt://${INSTANCE_NAME}.${APP_NAMESPACE}.svc.cluster.local:7687\"\n    HTTP_ENDPOINT=\"http://${INSTANCE_NAME}.${APP_NAMESPACE}.svc.cluster.local:7474\"\n  fi\nfi\n\nmkdir -p \"$(dirname \"${AZ_SCRIPTS_OUTPUT_PATH}\")\"\ncat <<EOF > \"${AZ_SCRIPTS_OUTPUT_PATH}\"\n{\n  \"status\": \"Success\",\n  \"operatorNamespace\": \"${OPERATOR_NAMESPACE}\",\n  \"operatorVersion\": \"${OPERATOR_VERSION}\",\n  \"databaseEndpoint\": \"${DATABASE_ENDPOINT}\",\n  \"boltEndpoint\": \"${BOLT_ENDPOINT}\",\n  \"httpEndpoint\": \"${HTTP_ENDPOINT}\",\n  \"clusterName\": \"${CLUSTER_NAME}\"\n}\nEOF"
+      }
+    }
+  ],
+  "outputs": {
+    "aksClusterName": {
+      "type": "string",
+      "value": "[parameters('clusterName')]"
+    },
+    "operatorNamespace": {
+      "type": "string",
+      "value": "[parameters('operatorNamespace')]"
+    },
+    "operatorVersion": {
+      "type": "string",
+      "value": "[parameters('operatorVersion')]"
+    },
+    "status": {
+      "type": "string",
+      "value": "[reference(variables('deploymentScriptName')).outputs.status]"
+    },
+    "databaseEndpoint": {
+      "type": "string",
+      "value": "[reference(variables('deploymentScriptName')).outputs.databaseEndpoint]"
+    },
+    "boltEndpoint": {
+      "type": "string",
+      "value": "[reference(variables('deploymentScriptName')).outputs.boltEndpoint]"
+    },
+    "httpEndpoint": {
+      "type": "string",
+      "value": "[reference(variables('deploymentScriptName')).outputs.httpEndpoint]"
+    },
+    "aksConnectCommand": {
+      "type": "string",
+      "value": "[concat('az aks get-credentials --resource-group ', resourceGroup().name, ' --name ', parameters('clusterName'), ' --overwrite-existing')]"
+    }
+  }
+}

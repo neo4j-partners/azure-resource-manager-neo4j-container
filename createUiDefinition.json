@@ -1,0 +1,307 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/0.1.2-preview/CreateUIDefinition.MultiVm.json#",
+  "handler": "Microsoft.Azure.CreateUIDef",
+  "version": "0.1.2-preview",
+  "parameters": {
+    "basics": [
+      {
+        "name": "clusterName",
+        "type": "Microsoft.Common.TextBox",
+        "label": "AKS Cluster Name",
+        "defaultValue": "neo4j-aks-cluster",
+        "toolTip": "Specify a unique name for the Azure Kubernetes Service cluster (3-63 lowercase alphanumeric characters or hyphens).",
+        "constraints": {
+          "required": true,
+          "regex": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$",
+          "validationMessage": "The cluster name must be between 3 and 63 characters long, start and end with an alphanumeric character, and contain only lowercase letters, numbers, and hyphens."
+        }
+      }
+    ],
+    "steps": [
+      {
+        "name": "clusterSettings",
+        "label": "AKS Cluster Configuration",
+        "elements": [
+          {
+            "name": "clusterSettingsIntro",
+            "type": "Microsoft.Common.TextBlock",
+            "options": {
+              "text": "Configure the Azure Kubernetes Service (AKS) cluster that will host the Neo4j Kubernetes Operator."
+            }
+          },
+          {
+            "name": "kubernetesVersion",
+            "type": "Microsoft.Common.DropDown",
+            "label": "Kubernetes Version",
+            "defaultValue": "1.30",
+            "toolTip": "Select the Kubernetes version for the AKS cluster control plane and nodes.",
+            "constraints": {
+              "allowedValues": [
+                {
+                  "label": "1.30 (Recommended)",
+                  "value": "1.30"
+                },
+                {
+                  "label": "1.29",
+                  "value": "1.29"
+                },
+                {
+                  "label": "1.28",
+                  "value": "1.28"
+                }
+              ],
+              "required": true
+            }
+          },
+          {
+            "name": "nodeVmSize",
+            "type": "Microsoft.Compute.SizeSelector",
+            "label": "Worker Node VM Size",
+            "toolTip": "Choose the VM size for the AKS worker nodes. Standard_D4s_v5 or Standard_DS3_v2 recommended for production.",
+            "recommendedSizes": [
+              "Standard_D4s_v5",
+              "Standard_D8s_v5",
+              "Standard_DS3_v2",
+              "Standard_DS4_v2",
+              "Standard_E4s_v5"
+            ],
+            "constraints": {
+              "required": true
+            }
+          },
+          {
+            "name": "nodeCount",
+            "type": "Microsoft.Common.Slider",
+            "label": "Worker Node Count",
+            "defaultValue": 3,
+            "toolTip": "Number of worker nodes in the initial system agent pool (minimum 3 recommended for high availability).",
+            "constraints": {
+              "required": true,
+              "min": 1,
+              "max": 20,
+              "step": 1
+            }
+          },
+          {
+            "name": "osDiskSizeGB",
+            "type": "Microsoft.Common.TextBox",
+            "label": "OS Disk Size (GB)",
+            "defaultValue": "128",
+            "toolTip": "Operating system disk size in GB for each AKS node.",
+            "constraints": {
+              "required": true,
+              "regex": "^[0-9]{2,4}$",
+              "validationMessage": "Please provide a valid disk size in GB between 30 and 2048."
+            }
+          }
+        ]
+      },
+      {
+        "name": "operatorSettings",
+        "label": "Neo4j Operator Configuration",
+        "elements": [
+          {
+            "name": "operatorIntro",
+            "type": "Microsoft.Common.TextBlock",
+            "options": {
+              "text": "The Neo4j Kubernetes Operator automates the deployment, lifecycle management, and scaling of Neo4j graph databases on Kubernetes."
+            }
+          },
+          {
+            "name": "operatorVersion",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Operator Release Version",
+            "defaultValue": "1.0.0",
+            "toolTip": "Target version of the Neo4j Kubernetes Operator Helm chart from ghcr.io/neo4j-partners/charts/neo4j-operator.",
+            "constraints": {
+              "required": true,
+              "regex": "^[0-9]+\\.[0-9]+\\.[0-9]+.*$",
+              "validationMessage": "Please specify a valid semver version (e.g. 1.0.0)."
+            }
+          },
+          {
+            "name": "operatorNamespace",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Operator Namespace",
+            "defaultValue": "neo4j-operator-system",
+            "toolTip": "The Kubernetes namespace where the operator controller and CRDs will be installed.",
+            "constraints": {
+              "required": true,
+              "regex": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$",
+              "validationMessage": "Must be a valid Kubernetes namespace name."
+            }
+          }
+        ]
+      },
+      {
+        "name": "databaseSettings",
+        "label": "Neo4j Database Instance",
+        "elements": [
+          {
+            "name": "deployDatabaseInstance",
+            "type": "Microsoft.Common.CheckBox",
+            "label": "Deploy Initial Neo4j Database",
+            "defaultValue": true,
+            "toolTip": "Check this box to automatically provision a Neo4j database Custom Resource upon cluster creation."
+          },
+          {
+            "name": "databaseInstanceName",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Database Instance Name",
+            "defaultValue": "neo4j-instance",
+            "toolTip": "Name of the Neo4j Custom Resource.",
+            "constraints": {
+              "required": true,
+              "regex": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$",
+              "validationMessage": "Must be a valid Kubernetes resource name."
+            },
+            "visible": "[steps('databaseSettings').deployDatabaseInstance]"
+          },
+          {
+            "name": "neo4jEdition",
+            "type": "Microsoft.Common.DropDown",
+            "label": "Neo4j Edition",
+            "defaultValue": "enterprise",
+            "toolTip": "Choose between Enterprise Edition (clustering, advanced security) and Community Edition (standalone only).",
+            "constraints": {
+              "allowedValues": [
+                {
+                  "label": "Enterprise Edition (BYOL / Evaluation)",
+                  "value": "enterprise"
+                },
+                {
+                  "label": "Community Edition (GPLv3)",
+                  "value": "community"
+                }
+              ],
+              "required": true
+            },
+            "visible": "[steps('databaseSettings').deployDatabaseInstance]"
+          },
+          {
+            "name": "acceptLicense",
+            "type": "Microsoft.Common.CheckBox",
+            "label": "I accept the Neo4j Enterprise Edition License Agreement",
+            "defaultValue": true,
+            "toolTip": "Required for Enterprise Edition deployments.",
+            "visible": "[and(steps('databaseSettings').deployDatabaseInstance, equals(steps('databaseSettings').neo4jEdition, 'enterprise'))]"
+          },
+          {
+            "name": "neo4jVersion",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Neo4j Database Version",
+            "defaultValue": "5.26.0",
+            "toolTip": "Neo4j server version to run.",
+            "constraints": {
+              "required": true
+            },
+            "visible": "[steps('databaseSettings').deployDatabaseInstance]"
+          },
+          {
+            "name": "topologyMode",
+            "type": "Microsoft.Common.DropDown",
+            "label": "Topology Mode",
+            "defaultValue": "Standalone",
+            "toolTip": "Standalone runs 1 instance; Cluster runs high-availability Raft cluster (Enterprise only).",
+            "constraints": {
+              "allowedValues": [
+                {
+                  "label": "Standalone",
+                  "value": "Standalone"
+                },
+                {
+                  "label": "Cluster (Enterprise Only)",
+                  "value": "Cluster"
+                }
+              ],
+              "required": true
+            },
+            "visible": "[steps('databaseSettings').deployDatabaseInstance]"
+          },
+          {
+            "name": "clusterCoreCount",
+            "type": "Microsoft.Common.Slider",
+            "label": "Cluster Core Servers",
+            "defaultValue": 3,
+            "toolTip": "Number of core servers in the cluster (typically 3 or 5).",
+            "constraints": {
+              "required": true,
+              "min": 3,
+              "max": 9,
+              "step": 2
+            },
+            "visible": "[and(steps('databaseSettings').deployDatabaseInstance, equals(steps('databaseSettings').topologyMode, 'Cluster'))]"
+          },
+          {
+            "name": "storageSize",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Persistent Storage Size",
+            "defaultValue": "20Gi",
+            "toolTip": "Disk volume size for database files (e.g. 20Gi, 100Gi).",
+            "constraints": {
+              "required": true,
+              "regex": "^[0-9]+(Gi|Ti)$",
+              "validationMessage": "Please specify a size followed by Gi or Ti (e.g., 20Gi)."
+            },
+            "visible": "[steps('databaseSettings').deployDatabaseInstance]"
+          },
+          {
+            "name": "neo4jPassword",
+            "type": "Microsoft.Common.PasswordBox",
+            "label": {
+              "password": "Initial neo4j Password (Optional)",
+              "confirmPassword": "Confirm Password"
+            },
+            "toolTip": "If left blank, the operator generates a random secret. If provided, must meet Azure complexity requirements.",
+            "constraints": {
+              "required": false
+            },
+            "visible": "[steps('databaseSettings').deployDatabaseInstance]"
+          },
+          {
+            "name": "serviceType",
+            "type": "Microsoft.Common.DropDown",
+            "label": "Service Connectivity",
+            "defaultValue": "LoadBalancer",
+            "toolTip": "LoadBalancer creates an Azure Public Load Balancer for direct access; ClusterIP keeps the service internal to the cluster.",
+            "constraints": {
+              "allowedValues": [
+                {
+                  "label": "Public LoadBalancer (Azure Public IP)",
+                  "value": "LoadBalancer"
+                },
+                {
+                  "label": "Internal ClusterIP (Cluster Only)",
+                  "value": "ClusterIP"
+                }
+              ],
+              "required": true
+            },
+            "visible": "[steps('databaseSettings').deployDatabaseInstance]"
+          }
+        ]
+      }
+    ],
+    "outputs": {
+      "clusterName": "[basics('clusterName')]",
+      "location": "[location()]",
+      "kubernetesVersion": "[steps('clusterSettings').kubernetesVersion]",
+      "nodeVmSize": "[steps('clusterSettings').nodeVmSize]",
+      "nodeCount": "[steps('clusterSettings').nodeCount]",
+      "osDiskSizeGB": "[int(steps('clusterSettings').osDiskSizeGB)]",
+      "operatorVersion": "[steps('operatorSettings').operatorVersion]",
+      "operatorNamespace": "[steps('operatorSettings').operatorNamespace]",
+      "deployDatabaseInstance": "[steps('databaseSettings').deployDatabaseInstance]",
+      "databaseInstanceName": "[steps('databaseSettings').databaseInstanceName]",
+      "neo4jEdition": "[steps('databaseSettings').neo4jEdition]",
+      "acceptLicense": "[steps('databaseSettings').acceptLicense]",
+      "neo4jVersion": "[steps('databaseSettings').neo4jVersion]",
+      "topologyMode": "[steps('databaseSettings').topologyMode]",
+      "clusterCoreCount": "[steps('databaseSettings').clusterCoreCount]",
+      "storageSize": "[steps('databaseSettings').storageSize]",
+      "neo4jPassword": "[steps('databaseSettings').neo4jPassword]",
+      "serviceType": "[steps('databaseSettings').serviceType]"
+    }
+  }
+}
+

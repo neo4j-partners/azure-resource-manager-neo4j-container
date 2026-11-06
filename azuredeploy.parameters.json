@@ -1,0 +1,58 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "clusterName": {
+      "value": "neo4j-aks-cluster"
+    },
+    "kubernetesVersion": {
+      "value": "1.30"
+    },
+    "nodeVmSize": {
+      "value": "Standard_D4s_v5"
+    },
+    "nodeCount": {
+      "value": 3
+    },
+    "osDiskSizeGB": {
+      "value": 128
+    },
+    "operatorVersion": {
+      "value": "1.0.0"
+    },
+    "operatorNamespace": {
+      "value": "neo4j-operator-system"
+    },
+    "deployDatabaseInstance": {
+      "value": true
+    },
+    "databaseInstanceName": {
+      "value": "neo4j-instance"
+    },
+    "neo4jEdition": {
+      "value": "enterprise"
+    },
+    "acceptLicense": {
+      "value": true
+    },
+    "neo4jVersion": {
+      "value": "5.26.0"
+    },
+    "topologyMode": {
+      "value": "Standalone"
+    },
+    "clusterCoreCount": {
+      "value": 3
+    },
+    "storageSize": {
+      "value": "20Gi"
+    },
+    "neo4jPassword": {
+      "value": ""
+    },
+    "serviceType": {
+      "value": "LoadBalancer"
+    }
+  }
+}
+

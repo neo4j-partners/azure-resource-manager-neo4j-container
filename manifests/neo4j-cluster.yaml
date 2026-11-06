@@ -1,0 +1,30 @@
+# Example: Neo4j High Availability Cluster (Enterprise Edition)
+apiVersion: neo4j.com/v1
+kind: Neo4j
+metadata:
+  name: neo4j-cluster
+  namespace: default
+spec:
+  edition: enterprise
+  version: "5.26.0"
+  license:
+    accept: "yes"
+  topology:
+    mode: Cluster
+    cluster:
+      core:
+        servers: 3
+  storage:
+    volumes:
+      data:
+        mode: Dynamic
+        dynamic:
+          storageClassName: default
+          size: 50Gi
+  networking:
+    services:
+      default:
+        type: LoadBalancer
+  auth:
+    generatePassword: true
+
